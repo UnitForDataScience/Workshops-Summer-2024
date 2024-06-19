@@ -1,0 +1,324 @@
+---
+title: "Day 3: Topic Modeling"
+format: html
+editor: visual
+---
+
+```{r}
+setwd("/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis")
+```
+
+```{r}
+rm(list = ls())
+#install.packages("caret")
+#install.packages("glmnet")
+#install.packages("lattice")
+#install.packages("FactoMineR")
+#install.packages("factoextra") 
+#install.packages("stm")
+
+library(readxl)
+library(caret) 
+library(glmnet)
+library(pROC)
+library(plyr)
+library(dplyr)
+library(quanteda)
+library(readtext)
+library(FactoMineR)
+library(factoextra)
+library(stm)
+```
+
+## Load Data
+
+```{r}
+data_dir<-"/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis/"                       
+
+
+UNGD<- readtext(paste0(data_dir, "UNGD/*"),                         ### import txt files
+                             docvarsfrom = "filenames", 
+                             dvsep="_", 
+                             docvarnames = c("ccodealp", "session", "year"))
+
+```
+
+## Create Corpus
+
+```{r}
+UNGD_corpus <- corpus(UNGD, text_field = "text")                    ### create quanteda corpus 
+head(summary(UNGD_corpus))
+```
+
+## Preprocessing Corpus
+
+```{r}
+### tokenization with punctuation, symbols, numbers, URLs, and separators removal
+ungd_tokens <- tokens(UNGD_corpus,
+                      what = "word",
+                      remove_punct = TRUE,
+                      remove_symbols = TRUE,
+                      remove_numbers = TRUE,
+                      remove_url = TRUE,
+                      remove_separators = TRUE)
+
+### remove stop words
+ungd_tokens_nostop<- tokens_remove(ungd_tokens, 
+                            stopwords("en"), padding = FALSE) ### padding sets placeholder
+
+
+### stemming
+ungd_clean<- tokens_wordstem(ungd_tokens_nostop, language = "en")
+```
+
+## Text Vectorization: Document Feature Matrix
+
+```{r}
+ungd_dfm<- dfm(ungd_clean, 
+               tolower = TRUE)                                      ### create DFM and lower the terms 
+
+
+ungd_dfm[10:15,]                                                    ### let's view it  
+
+
+ungd_df<-convert(ungd_dfm, 
+                 to = "data.frame")                                 ### view it as data frame 
+```
+
+## Basic Topic Modeling with LDA
+
+```{r}
+ungd2022 <- dfm_subset(ungd_dfm, year ==2022)                                                         
+
+
+### fit a topic model with k = 5 topics
+lda_model<- stm(ungd_dfm,                                                                             
+               K = 5,
+               init.type = "LDA", 
+               seed = 12345,
+               verbose = FALSE)
+```
+
+```{r}
+summary(lda_model)
+
+### Highest prob: Highest probability terms 
+### FREX: Frequent and exclusive terms
+### Lift:  Less frequent terms in other topics 
+### Score: Log frequency of word in the topic divided by log frequency of the word in other topics
+```
+
+## Interpretation
+
+1.  **Topic 1 - Climate Impact on Island Nations:**
+
+    -   **Core Concepts:** Development, climate change, global challenges, and their impact on nations.
+
+    -   **Regional Focus:** Primarily islands and regions in Pacific Ocean.
+
+    -   **Specific Insights:** This topic appears to focus on vulnerabilities and challenges faced by small island nations due to climate change. Terms such as 'sid', 'ocean', and 'solomon' might suggest a special emphasis on small island developing states.
+
+2.  **Topic 2 - Geopolitical Conflicts and Regional Dynamics:**
+
+    -   **Core Concepts:** International relations, peace, and geopolitical conflicts.
+
+    -   **Regional Focus:** Countries such as Azerbaijan,Armenia, Iraq, Syria, Israel,Iran.
+
+    -   **Specific Insights:** This topic delves into geopolitical tensions, specifically in Middle East and surrounding regions. Presence of 'azerbaijan' and 'armenia' hints at discussions related to conflict between them.
+
+3.  **Topic 3 - european Political Landscape and Conflicts:**
+
+    -   **Core Concepts:** Wars, global security, and European geopolitics.
+
+    -   **Regional Focus:** Primarily European countries, with an emphasis on Ukraine and Russia.
+
+    -   **Specific Insights:** This topic provides insights into political tension between Russia and Ukraine, as evident from 'ukrainian' and 'russia'.
+
+4.  **Topic 4 - African Security and development:**
+
+    -   **Core Concepts:** International peace, security, and developmental challenges.
+
+    -   **Regional Focus:** Primarily African nations like Mali, Congo, Sudan, and Central African Republic.
+
+    -   **Specific Insights:** Topic centers on political and social challenges in various African nations. Issues related to peacekeeping, developmental challenges, and security concerns in African continent seem to be focus.
+
+5.  **Topic 5 - Global Development and Agriculture:**
+
+    -   **Core Concepts:** Global development, education, and agriculture.
+
+    -   **Regional Focus:** Broader global context, with mentions of specific countries like Bhutan, Guyana, and Namibia.
+
+    -   **Specific Insights:** This topic looks at challenges and opportunities in education, agricultural productivity, and broader developmental goals. The emphasis on 'food', 'agriculture', and 'product' might indicate discussions around food security and sustainable agriculture.
+
+
+## Topic Quality
+
+```{r}
+topicQuality(model=lda_model, documents=ungd_dfm)
+
+
+### Semantic Coherence measures how often top words of a certain topic appear together in documents. 
+### Higher coherence indicates that words in the topic make sense together.
+
+
+### Exclusivity evaluates how exclusive top words of a topic are to that topic compared to other topics.
+### Higher exclusivity means that words are unique to the topic and do not overlap much with other topics.
+```
+
+## Topic proportions
+
+```{r}
+plot.STM(lda_model,
+         type="summary",
+         labeltype = "frex",
+         n = 5)
+```
+
+## Structural Topic Models(STM): Preparing Data
+
+```{r}
+### import excel data 
+total <- read_excel("total.xlsx")
+
+### merge variables from "total" to "UNGD"
+ungd_merge<-merge(UNGD, total, by= c("ccodealp","year"), all = FALSE)                          
+
+
+UNGD_corpus <- corpus(ungd_merge, text_field = "text")  ### now create quantida corpus 
+head(summary(UNGD_corpus))
+
+### tokenization with punctuation, symbols, numbers, URLs, and separators removal
+ungd_tokens <- tokens(UNGD_corpus,
+                      what = "word",
+                      remove_punct = TRUE,
+                      remove_symbols = TRUE,
+                      remove_numbers = TRUE,
+                      remove_url = TRUE,
+                      remove_separators = TRUE)
+
+### remove stop words
+ungd_tokens_nostop<- tokens_remove(ungd_tokens, 
+                            stopwords("en"), padding = FALSE) ### padding sets placeholder
+
+
+### stemming
+ungd_clean<- tokens_wordstem(ungd_tokens_nostop, language = "en")
+
+
+### create DFM and lower the terms 
+ungd_dfm<- dfm(ungd_clean, 
+               tolower = TRUE)                                    
+```
+
+```{r}
+### further preparing 
+
+
+### subset text data 
+ungd2015 <- dfm_subset(ungd_dfm, 
+                       year %in% 2001:2008)         
+
+
+
+### convert DFM into a format compatible with stm package (structural topic modeling)
+ungd_out <- quanteda::convert(ungd2015, to = "stm") 
+
+### extract the "documents" component from ungd_out object.
+ungd_docs <- ungd_out$documents                     
+
+
+### extract the "vocab" (vocabulary) component from ungd_out object    
+ungd_vocab <- ungd_out$vocab                        
+
+
+### extract the "meta" (metadata) component from ungd_outobject. 
+### metadata typically contains document-level variables
+ungd_meta <- ungd_out$meta                          
+```
+
+## Running STM
+
+```{r}
+### fit STM:regression equation that models prevalence by covariates
+
+stm_model<- stm(documents = ungd_out$documents, ### documents
+               vocab = ungd_out$vocab,  ### terms
+               K = 5, ### number of topics
+               prevalence =~ IdealPointAll+vdem_gender+regime_status_name+gaiscore+s(year), 
+               data = ungd_meta, 
+               init.type = "Spectral", ### alternative is "LDA"  but Spectral is faster
+               seed = 123) ### seed for reproduceablity
+
+summary(stm_model)
+```
+
+## Topic quality
+
+```{r}
+topicQuality(model=stm_model, documents=ungd_docs)
+```
+
+## Topic Proportions
+
+```{r}
+plot.STM(stm_model,
+         type="summary",
+         labeltype = "frex",
+         n = 5)
+```
+
+## Regression Analysis
+
+```{r}
+topics_model<- estimateEffect(1:5 ~ regime_status_name + gaiscore+ s(year), 
+                                stm_model, 
+                                meta = ungd_meta)
+summary(topics_model)
+```
+
+## Changes in Topics over Time
+
+```{r}
+plot.estimateEffect(topics_model,
+                    covariate = "year",
+                    method = "continuous",
+                    topics = 1)
+
+plot.estimateEffect(topics_model,
+                    covariate = "year",
+                    method = "continuous",
+                    topics = 2)
+
+plot.estimateEffect(topics_model,
+                    covariate = "year",
+                    method = "continuous",
+                    topics = 3)
+
+plot.estimateEffect(topics_model,
+                    covariate = "year",
+                    method = "continuous",
+                    topics = 4)
+
+plot.estimateEffect(topics_model,
+                    covariate = "year",
+                    method = "continuous",
+                    topics = 5)
+```
+
+## Choosing Topic Number
+
+```{r}
+topics_number<- searchK(documents = ungd_out$documents,  
+                            vocab = ungd_out$vocab, 
+                            K = c(4:8), 
+                            prevalence =~ regime_status_name + gaiscore+ s(year),  
+                            data = ungd_meta,
+                            seed = 123,
+                        verbose =FALSE)
+```
+
+## Plotting "optimal" topic numbers
+
+```{r}
+plot(topics_number)
+```
