@@ -1,0 +1,421 @@
+---
+title: "Day 1"
+format: html
+author: Namig Abbasov 
+editor: visual
+---
+
+```{r}
+rm(list = ls())
+#install.packages("stopwords", dependencies = TRUE)          ### access to stopwords for various languages
+#install.packages("cowplot", dependencies = TRUE)            ###combining multiple plots into a single plot
+#install.packages("quanteda", dependencies = TRUE)           ### comprehensive package for text analysis 
+#install.packages("quanteda.textplots", dependencies = TRUE) ### creating textual plots(e.g.clouds)
+#install.packages("quanteda.textstats", dependencies = TRUE) ### statistical functions for text analysis
+#install.packages("quanteda.corpus", dependencies = TRUE)    ### corpus management within quanteda 
+#install.packages("gridExtra")                               ### grid-based layouts of plots
+#install.packages("RColorBrewer")  
+#install.packages("tidyverse")
+#install.packages("ggplot2")
+
+library(gridExtra)
+library(caret) 
+library(glmnet)
+library(pROC)
+library(plyr)
+library(dplyr)
+library(quanteda)
+library(readtext)
+library(quanteda.textplots)                                ### for "textplot_xray"
+library(tidyverse)
+library(ggplot2)
+```
+
+
+
+```{r}
+### Set Data Directory 
+
+setwd("/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis")
+```
+
+```{r}
+### Assign Data Directory
+
+data_dir<-"/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis/"
+```
+
+
+```{r}
+### Load Text Data 
+
+UNGD<- readtext(paste0(data_dir, "UNGD/*"), 
+                             docvarsfrom = "filenames", 
+                             dvsep="_", 
+                             docvarnames = c("ccodealp", "session", "year")
+                )
+
+### we import raw txt files, drawing document metadata from the txt file names
+### this will create table of documents - view(UNGD)
+```
+
+
+
+## Create Corpus
+
+```{r}
+### We create corpus from documents dataframe 
+UNGD_corpus <- corpus(UNGD, text_field = "text")   ### creating Quantida corpus 
+summary(UNGD_corpus)                               ### Types- number of unique words (types)
+as.character(UNGD_corpus)[1]                       ### Look at first speech       
+```
+```{r}
+### subset text data 
+summary(corpus_subset(UNGD_corpus, ccodealp == "USA"))
+summary(corpus_subset(UNGD_corpus, year== 2022 & ccodealp == "USA"))
+```
+
+## Preprocessing 
+```{r}
+### tokenize by word
+ungd_tokens <- tokens(UNGD_corpus,
+                       what = "word",
+                       remove_punct = TRUE,                            ### remove punctuation  
+                       remove_symbols = TRUE,                          ### removes unicode symbols 
+                       remove_numbers = TRUE,                          ### remove numbers 
+                       remove_url = TRUE,                              ### remove urls 
+                       remove_separators = TRUE                        ### removes separators as categorized in unicode
+                       )                        
+                                            
+
+
+
+
+
+
+### **if you prefer stemming and stopword removal before creating DFM**
+#ungd_tokens<- tokens(ungd_tokens) |>                                   ### remove stopwords 
+                 #tokens_remove(stopwords("english"))
+
+
+#ungd_tokens <- tokens_wordstem (ungd_tokens, language = "english")    ### stemming 
+```
+
+```{r}
+### We can get token lengths and visualize distribution of word Lengths
+
+
+word_lengths <- unlist(lapply(ungd_tokens, nchar))           ### Compute word lengths
+word_lengths_df <- data.frame(word_length = word_lengths)    ### Create a data frame 
+
+
+### Plot the histogram using ggplot2
+ggplot(word_lengths_df, aes(x = word_length)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  labs(title = "Distribution of Word Lengths",
+       x = "Word Length (Number of Characters)",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+```{r}
+### Explore Key Words in Context
+
+kwic(ungd_tokens, "democracy", window=2)
+kwic(ungd_tokens, "ukraine", window=2)
+kwic(ungd_tokens, "war", window=2)
+```
+
+
+## Document Feature Matrix(DFM)
+
+### create Document Feature Matrix(DFM)
+```{r}
+## Time to create Document Feature Matrix(DFM)
+
+ungd_dfm<- dfm(ungd_tokens, 
+               tolower = TRUE)                                ### create DFM and lower the terms 
+
+df<-ungd_dfm[100:150,500:550]                                 ### explore it 
+
+ungd_df<-convert(df, to = "data.frame")                       ### convert it to data frame 
+```
+
+
+### preprocessing after creating DFM
+```{r}
+### continue preprocessing after creating DFM
+
+ungd_nonstop<-  dfm_remove(ungd_dfm, 
+                           pattern = stopwords("en"))                           ### remove stopwords 
+
+stopwords("en", source = "smart")                                               ### English  
+stopwords("de")                                                                 ### German
+stopwords("zh", source = "misc")                                                ### Chinese language 
+stopwords("es")                                                                 ### Spanish
+
+
+ungd_stem <- dfm_wordstem(ungd_nonstop, 
+                          language = "en")                                      ### stemming
+
+
+ungd_nosparse <- dfm_trim(ungd_stem, 
+                          min_count = 3)                                        ### remove sparse terms
+
+
+
+ungd_dfm
+ungd_nonstop
+ungd_stem 
+ungd_nosparse
+```
+
+### top words in DFM
+```{r}
+### let's look at top words in DFM
+topfeatures(ungd_dfm,10) 
+topfeatures(ungd_nonstop,10)
+topfeatures(ungd_stem,10)
+```
+
+```{r}
+### we can make a dataframe and view it better 
+
+top_terms = data.frame("Rank" = 1:10,
+                       "original" = names(topfeatures(ungd_dfm,10)),
+                       "stopword_removed" = names(topfeatures(ungd_nonstop,10)),
+                       "stemmed" = names(topfeatures(ungd_stem,10)),
+                       "no_infrequent" = names(topfeatures(ungd_nosparse,10)))
+
+top_terms
+```
+
+
+### least used words in DFM
+```{r}
+### Similarly, we can explore least used words in different versions of DFM 
+
+few_terms= data.frame("Rank" = 1:10,
+                       "original" = names(topfeatures(ungd_dfm,10, decreasing = FALSE)),
+                       "stopword_removed" = names(topfeatures(ungd_nonstop,10, decreasing = FALSE)),
+                       "stemmed" = names(topfeatures(ungd_stem,10, decreasing = FALSE)),
+                       "no_infrequent" = names(topfeatures(ungd_nosparse,10, decreasing = FALSE)))
+few_terms 
+```
+
+### vusualize top words 
+```{r}
+### Time to visualize 
+
+
+
+term_freq <- topfeatures(ungd_dfm, 20)                                     ### get term frequencies
+term_freq_df <- data.frame(term = names(term_freq), frequency = term_freq) ### make it dataframe
+
+
+### Bar plot of term frequencies in original dfm
+p1<-ggplot(term_freq_df, aes(x = reorder(term, frequency), y = frequency)) +
+  geom_bar(stat = "identity", fill = "black") +
+  coord_flip() +
+  labs(title = "Top 20 Terms in Original Corpus", x = "Terms", y = "Frequency")
+
+
+
+
+
+
+
+term_freq <- topfeatures(ungd_nonstop, 20)                                 ### get term frequencies
+term_freq_df <- data.frame(term = names(term_freq), frequency = term_freq)
+
+### Bar plot of term frequencies in stopwords removed version of dfm
+p2<-ggplot(term_freq_df, aes(x = reorder(term, frequency), y = frequency)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +
+  labs(title = "Top 20 Terms in Stopwords Removed Corpus", x = "Terms", y = "Frequency")
+
+
+
+
+
+term_freq <- topfeatures(ungd_stem, 20)                                   ### get term frequencies
+term_freq_df <- data.frame(term = names(term_freq), frequency = term_freq)
+
+### Bar plot of term frequencies in stemmed version of dfm 
+p3<-ggplot(term_freq_df, aes(x = reorder(term, frequency), y = frequency)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  coord_flip() +
+  labs(title = "Top 20 Terms in Stemmed Corpus", x = "Terms", y = "Frequency")
+
+
+
+
+
+
+
+term_freq <- topfeatures(ungd_nosparse, 20)           ### Get term frequencies
+term_freq_df <- data.frame(term = names(term_freq), frequency = term_freq)
+
+### Bar plot of term frequencies in ungd_nosparse dfm
+p4<-ggplot(term_freq_df, aes(x = reorder(term, frequency), y = frequency)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Top 20 Terms in NonSparsed Corpus", x = "Terms", y = "Frequency")
+
+
+
+
+
+### Arrange plots in a grid
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+```{r}
+### Or we can just make a function to plot if we don't want to run full separate codes to make those plots 
+
+### Function to create bar plots for top terms
+plot_top_terms <- function(dfm, title) {
+  term_freq <- topfeatures(dfm, 20)
+  term_freq_df <- data.frame(term = names(term_freq), frequency = term_freq)
+  ggplot(term_freq_df, aes(x = reorder(term, frequency), y = frequency)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    labs(title = title, x = "Terms", y = "Frequency")
+}
+
+### Create plots for each preprocessing step
+plot1 <- plot_top_terms(ungd_dfm, "Original")
+plot2 <- plot_top_terms(ungd_nonstop, "Stopwords Removed")
+plot3 <- plot_top_terms(ungd_stem, "Stemmed")
+plot4 <- plot_top_terms(ungd_nosparse, "Infrequent Terms Removed")
+
+### Arrange plots in a grid
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+```
+
+### keyword-in-context" (KWIC)
+```{r}
+### Plot Three Key Terms from 2021
+
+dfm_corpus <- dfm(tokens(corpus_subset(UNGD_corpus, year == 2021)))       ### Create DFM for the subset of UNGD corpus  
+
+terms_of_interest <- c("democracy", "ukraine", "war")                     ### vector of words we are interested 
+dfm_subset <- dfm_select(dfm_corpus, pattern = terms_of_interest)         ### Subset DFM for the terms of interest
+
+document_sums <- rowSums(dfm_subset)                                      ### sum term frequencies for each document 
+top_20_indices <- order(document_sums, decreasing = TRUE)[1:20]           ### obtain indices of top 20
+top_20_docs <- docnames(dfm_corpus)[top_20_indices]                       ### get documents with top 20
+
+corpus_top_20 <- corpus_subset(UNGD_corpus, 
+                               docnames(UNGD_corpus) %in% top_20_docs)    ### Subset corpus for these top 20 docs
+
+
+
+
+
+### Generate textplot_xray() for top 20 docs
+kwic_democracy <- kwic(tokens(corpus_top_20), 
+                       pattern = "democracy")                             
+kwic_freedom <- kwic(tokens(corpus_top_20), 
+                     pattern = "ukraine")
+kwic_war <- kwic(tokens(corpus_top_20), 
+                 pattern = "war")
+
+
+
+
+### Visualize the KWIC occurrences for each term from the top 20 documents
+p1<-textplot_xray(kwic_democracy, scale = "absolute")                                     
+p2<-textplot_xray(kwic_freedom, scale = "absolute")
+p3<-textplot_xray(kwic_war, scale = "absolute")
+```
+
+
+```{r}
+### Plot Three Key Terms from 2022
+
+dfm_corpus <- dfm(tokens(corpus_subset(UNGD_corpus, year == 2022)))       ### Create DFM for the subset of UNGD corpus  
+
+terms_of_interest <- c("democracy", "ukraine", "war")                     ### vector of words we are interested 
+dfm_subset <- dfm_select(dfm_corpus, pattern = terms_of_interest)         ### Subset DFM for the terms of interest
+
+document_sums <- rowSums(dfm_subset)                                      ### sum term frequencies for each document 
+top_20_indices <- order(document_sums, decreasing = TRUE)[1:20]           ### obtain indices of top 20
+top_20_docs <- docnames(dfm_corpus)[top_20_indices]                       ### get documents with top 20
+
+corpus_top_20 <- corpus_subset(UNGD_corpus, 
+                               docnames(UNGD_corpus) %in% top_20_docs)    ### Subset corpus for these top 20 docs
+
+
+
+
+
+### Generate textplot_xray() for top 20 docs
+kwic_democracy <- kwic(tokens(corpus_top_20), 
+                       pattern = "democracy")                             
+kwic_freedom <- kwic(tokens(corpus_top_20), 
+                     pattern = "ukraine")
+kwic_war <- kwic(tokens(corpus_top_20), 
+                 pattern = "war")
+
+
+
+
+### Visualize the KWIC occurrences for each term from the top 20 documents
+p4<-textplot_xray(kwic_democracy, scale = "absolute")                                     
+p5<-textplot_xray(kwic_freedom, scale = "absolute")
+p6<-textplot_xray(kwic_war, scale = "absolute")
+```
+
+```{r}
+### show all in grid 
+grid.arrange(p1, p4, p2, p5, p3, p6, ncol=2)                                    
+```
+```{r}
+### you can  enhance textplot_xray visualization further 
+p<- textplot_xray(kwic_democracy, scale = "absolute") +
+  ggtitle("Key Word in Context (KWIC) for 'Democracy'") +
+  xlab("Position in Text") +
+  ylab("Frequency") +
+  theme_minimal() +
+  scale_color_brewer(palette = "blue")
+
+p
+```
+
+### word clouds
+```{r}
+
+textplot_wordcloud(dfm_select(ungd_dfm, 
+                              pattern = stopwords("english"), 
+                              selection = "remove"), 
+                   rotation = 0.45, 
+                   max_words = 200,
+                   color = rev(RColorBrewer::brewer.pal(10, "RdBu")))
+```
+
+## TF-IDF
+
+### convert DFM to TF-IDF
+```{r}
+### Let's convert our preprocessed DFM to TF-IDF
+
+ungd_tfidf <- dfm_tfidf(ungd_nosparse)
+
+tfidf_df <- convert(ungd_tfidf, to = "data.frame")
+head(tfidf_df)
+
+#dfm_subset_1000<- ungd_tfidf[, 1:1000]  ### subset if your machine doesn't support large data
+```
+
+### explore top terms
+```{r}
+### Explore top terms from TF-IDF
+
+top_tfidf <- topfeatures(ungd_tfidf, 20)
+top_tfidf_df<- data.frame(term = names(top_tfidf), tfidf = top_tfidf)
+ggplot(top_tfidf_df, aes(x = reorder(term, tfidf), y = tfidf)) +
+  geom_bar(stat = "identity", fill ="blue") +
+  coord_flip() +
+  labs(title = "Top 20 Terms by TF-IDF", x = "Terms", y = "TF-IDF Score")
+```
