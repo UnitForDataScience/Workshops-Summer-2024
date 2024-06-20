@@ -1,0 +1,128 @@
+---
+title: "KeyATM"
+source: "Mostly Taken from KeyATM Website"
+date: "2024-06-19"
+output: pdf_document
+---
+
+```{r}
+#install.packages("keyATM")
+
+
+library(quanteda)
+library(readtext)
+library(keyATM)
+library(magrittr)
+library(dplyr)
+```
+
+
+
+```{r}
+### get data from quanteda package 
+
+corpus_sotu<-quanteda.corpora::data_corpus_sotu [1:30]
+```
+
+## Preprocessing 
+```{r}
+library(quanteda)
+
+### tokenize corpus
+tokens_sotu <- tokens(
+  corpus_sotu,
+  remove_numbers = TRUE,
+  remove_punct = TRUE,
+  remove_symbols = TRUE,
+  remove_separators = TRUE,
+  remove_url = TRUE
+)
+
+### convert tokens to lowercase
+tokens_sotu <- tokens_tolower(tokens_sotu)
+
+### remove stopwords
+tokens_sotu <- tokens_remove(tokens_sotu, stopwords("english"))
+```
+
+
+```{r}
+dfm_sotu <- dfm(tokens_sotu, 
+                tolower = TRUE)
+
+sotu_df<-convert(dfm_sotu, 
+                 to = "data.frame")                                 ### view it as data frame 
+
+```
+
+```{r}
+### read text data for keyATM
+keyATM_docs <- keyATM_read(texts =dfm_sotu)
+summary(keyATM_docs)
+```
+
+## Create keywords list
+```{r}
+keywords <- list(
+  PowerSeperation = c("government", "states", "congress", "federal"),
+  Unity = c("people", "united", "country", "american"),
+  Governance     = c("laws", "law", "executive"),
+  Peace          = c("peace", "world", "freedom"),
+  Global = c("foreign", "war","nation", "global", "azerbaijan")
+)
+```
+
+## Checking keywords
+```{r}
+### create and display visualization of keyword distributions in corpus 
+
+
+key_viz <- visualize_keywords(docs = keyATM_docs, keywords = keywords)
+key_viz
+
+### get actual values
+values_fig(key_viz)
+
+
+### Warning: A keyword is pruned because it does not appear in the documents: azerbaijan
+```
+
+
+
+
+## Fit keyATM Base 
+```{r}
+out <- keyATM(
+  docs              = keyATM_docs,    ### text input
+  no_keyword_topics = 6,              ### number of topics without keywords
+  keywords          = keywords,       ### keywords
+  model             = "base",         ### select the model
+  options           = list(seed = 250)
+)
+```
+
+## Interpret
+```{r}
+top_words(out)
+plot_topicprop(out, show_topic = 1:5)
+top_docs(out)
+```
+
+## Entire document-topic distribution and topic-word distribution.
+```{r}
+out$theta  # Document-topic distribution
+out$phi    # Topic-word distribution
+```
+
+```{r}
+fig_modelfit <- plot_modelfit(out)
+fig_modelfit
+```
+
+```{r}
+plot_alpha(out)
+```
+
+```{r}
+plot_pi(out)
+```
