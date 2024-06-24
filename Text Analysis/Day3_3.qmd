@@ -1,0 +1,405 @@
+---
+title: "Day 3_3: Word Embeddings Glove Model"
+format: html
+editor: visual
+---
+
+```{r}
+#install.packages("text2vec")
+#install.packages("stringr")
+#install.packages("readtext")
+#install.packages("magrittr")
+#install.packages("Rtsne")
+#install.packages("word2vec")
+#install.packages("devtools")
+#devtools::install_github("bmschmidt/wordVectors")
+#install.packages("dplyr")
+#install.packages("ggplot2")
+#install.packages("textTinyR")
+#install.packages("tm")
+#install.packages("umap")
+#install.packages("plotly")
+
+
+library(wordVectors)### https://github.com/bmschmidt/wordVectors
+library(text2vec)   ### https://text2vec.org/
+library(readtext)   ### https://cran.r-project.org/web/packages/readtext/index.html
+library(magrittr)   ### https://magrittr.tidyverse.org/
+library(word2vec)   ### https://www.rdocumentation.org/packages/word2vec/versions/0.4.0/topics/word2vec
+library(conText)
+library(stringr)
+library(dplyr)
+library(Rtsne)
+library(ggplot2)
+library(textTinyR)
+library(tm) 
+library(umap)
+library(plotly)
+```
+
+## Data import
+
+```{r}
+data_directory <- "/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis/"
+ungd_data <- readtext(paste0(data_directory, "UNGD/*"), 
+                      docvarsfrom = "filenames", 
+                      dvsep = "_", 
+                      docvarnames = c("ccodealp", "session", "year"))
+ungd_data <- subset(ungd_data, year ==2022)
+```
+
+## Text preprocessing and tokenization
+
+```{r}
+tokenizer_function <- function(x) {
+  word_tokenizer(tolower(x))
+}
+ungd_tokens <- ungd_data$text |> 
+  tokenizer_function()
+```
+
+## Create vocabulary and term co-occurrence matrix (TCM)
+
+```{r}
+
+### following code sets up an iterator for tokenized text data(ungd_tokens). 
+### it is a preparatory step for subsequent text analysis or modeling tasks
+iterator <- itoken(ungd_tokens, progressbar = FALSE)
+```
+
+```{r}
+### function below processes token iterator (iterator) created earlier to build a vocabulary. 
+
+### vocabulary in this context is set of unique terms (or words) extracted from copus of text data
+ungd_vocabulary <- create_vocabulary(iterator) |>    ### create vocabulary using tokens iterator object 
+                   prune_vocabulary(term_count_min = 7L) |>       ### key only words that appear certain times 
+                   filter(!str_detect(term, "\\d"))               ### Remove terms that contain numbers
+
+
+### term: lists each unique word (or term) that has been identified in text data.
+### term_count: indicates total number of times each term appears across all documents
+### doc_count: shows number of documents where each term appears
+```
+
+```{r}
+### converts words terms into indices and numerical vectors according to predefined vocabulary
+### creates vectorizer object using pruned and filtered vocabulary above 
+### esentially prepares data for creating a Term Co-occurrence Matrix (TCM) 
+##  vectorizer_function is technically an object but acts like a function in next step
+
+vectorizer_function <- vocab_vectorizer(ungd_vocabulary)
+```
+
+```{r}
+### we now create co-occurrence matrix (TCM)
+tcm<- create_tcm(iterator, ### loop through large amounts of text data 
+                 vectorizer_function,  
+                 skip_grams_window = 4L, ### n of words before and after each target word for co-occurrences
+                 skip_grams_window_context = "symmetric") ### counts co-occurrences that occur both before and after target word
+```
+
+
+
+
+## Fit GloVe model
+
+```{r}
+### GloVe not based on a neural network but rather on matrix factorization techniques applied to TCM.
+### but, motivation and output are similar to neural-based embeddings.
+
+
+RcppParallel::setThreadOptions(1) ### number of threads available for parallel processing to 1
+set.seed(42) 
+
+
+
+### creates a new instance of a GloVe model
+glove_model <- GlobalVectors$new(rank = 100, ### Specifies dimensionality of output word vectors
+                                 x_max = 15) ### controls weighting of co-occurrence counts. used to prevent frequent co-occurrences from dominating training process disproportionately.
+
+
+
+main_vectors <- glove_model$fit_transform(tcm, 
+                                          n_iter = 15, ### number of iterations over data during training
+                                          learning_rate = 0.15,### controls how quickly model learns
+                                          convergence_tol = 0.001)  ### stops if improvement less than given number. prevents unnecessary computations 
+
+```
+```{r}
+### obtain contextual vectors 
+context_vectors <- glove_model$components
+
+
+
+### main vectors: captures more of the word's core semantic meaning.
+### context vectors: incorporates how word is used in different contexts.
+
+
+
+### Combine main and context vectors
+glove_embeddings <- main_vectors + t(context_vectors)
+
+### we transpose context_vectors because terms are columns. you can check: view(context_vectors)
+```
+
+
+```{r}
+
+### Save the word embeddings. These files are usually provided as replication files for publications 
+saveRDS(glove_embeddings, file = "/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis/word_embeddings_100d.rds")
+
+### Load word embeddings
+glove_embeddings <- readRDS("/Users/namigabbasov/Desktop/UDS/Workshops Summer 2024/Text Analysis/word_embeddings_100d.rds")
+
+### View the dimensions of embeddings
+dim(glove_embeddings)
+```
+
+## Visualization using t-SNE
+
+```{r}
+### Perform t-SNE, a dimentionality reduction technique 
+
+###t-SNE is good to create two-dimensional map of high-dimensional space that preserves local structure of data
+### excellent for visualizing how word embeddings cluster together.
+
+
+tsne_model <- Rtsne(glove_embeddings, ### our word embeddings 
+                    dims = 2,         ### make it 2 dimentional 
+                    perplexity = 30,  ### number of neighbors 
+                    verbose = TRUE)   ### show model processing 
+
+
+
+tsne_data <- as.data.frame(tsne_model$Y) ### convert two-dimensional outcome from t-sne to data frame 
+rownames(tsne_data) <- rownames(word_embeddings) 
+tsne_data$word <- rownames(tsne_data)
+
+### Plot t-SNE
+ggplot(tsne_data, aes(x = V1, y = V2, label = word)) +
+  geom_point(alpha = 0.5) +
+  geom_text(size = 2, alpha = 0.7, vjust = 1, hjust = 1) +
+  ggtitle("t-SNE Visualization of Word Embeddings") +
+  theme_minimal()
+```
+
+## Perform K-means clustering
+
+```{r}
+
+### we can also cluster, using K-means
+
+### K-means splits data into clusters such that total sum of squared distances from each point to mean point of its cluster is minimized.
+
+set.seed(42)
+
+kmeans_model <- kmeans(glove_embeddings,  
+                       centers = 5, ### number of clusters or groups 
+                       nstart = 20) ### n of different random initial configurations and choose best in terms of total within-cluster sum of squares
+
+
+clusters <- as.factor(kmeans_model$cluster)
+
+### add clusters to tsne_data for visualization
+tsne_data$cluster <- clusters
+
+# Plot t-SNE with clusters
+ggplot(tsne_data, aes(x = V1, y = V2, color = cluster, label = word)) +
+  geom_point(alpha = 0.5) +
+  geom_text(size = 2, alpha = 0.7, vjust = 1, hjust = 1) +
+  ggtitle("t-SNE Visualization of Word Embeddings with K-means Clusters") +
+  theme_minimal() +
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange"))
+```
+
+```{r}
+### perform hierarchical clustering: https://www.datacamp.com/tutorial/hierarchical-clustering-R
+
+
+
+### we first obtain distance matrix from glove_embeddings
+distance_matrix <- dist(glove_embeddings)
+### quantifies how 'far' each term is from each other
+### distance matrix is essential for clustering
+### Euclidean distance word1 [2,3], word [3,4], d = sqrt((x2 - x1)^2 + (y2 - y1)^2)
+
+
+### we can view it as matrix to make sense of it
+matrix_form <- as.matrix(distance_matrix)
+view(matrix_form)
+
+
+
+hc_model <- hclust(distance_matrix, 
+                   method = "ward.D2") ### Ward's method, clustering algorithm. popular - minimizes total within-cluster variance
+
+### type of clustering starts with each data point in its own cluster and iteratively merges the closest pairs of clusters into larger clusters, until all points are merged into a single cluster or until a specified condition is met
+
+
+
+
+### plot dendrogram
+plot(hc_model, 
+     labels = FALSE, 
+     main = "Hierarchical Clustering Dendrogram", xlab = "", 
+     sub = "", 
+     cex = 0.6) ### parameter controls character expansion factor
+
+rect.hclust(hc_model, k = 5, border = 2:6) ### enhance dendrogram plot created from hierarchical clustering results
+```
+
+## Find most similar words to given word
+
+```{r}
+### visualizations above are very hard to read because text data is large. 
+### We can just look similar words 
+
+### below, I define a function to get most similar words. 
+### you can break them down and do step-by-step as well. 
+
+
+### define function to find similar words using text2vec's built-in functions
+find_similar_words<- function(embeddings, word, top_n = 10) { ### three parameters
+  if (!word %in% rownames(embeddings)) { ### if given word is not in word embeddings
+    stop(paste("Word", word, "not found in embeddings.")) ### then stop. This is akin to raise in Python 
+  }
+  ### retrieve vector for target word: This is a simple indexing - word is just given term, comma means all columns 
+  word_vector <- embeddings[word, , drop = FALSE] ### drop = FALSE mean keep it as matrix 
+  
+  ### calculate cosine similarities - once we save row of word and save it as word_vector, 
+  ## we get cosine similarity
+  similarities <- sim2(x = embeddings, y = word_vector, method = "cosine", norm = "l2")  ### L2 Normalization
+  
+  ### convert similarities to vector
+  similarities <- as.vector(similarities)
+  names(similarities) <- rownames(embeddings)
+  
+  ### sort similarities and get top_n similar words, excluding target word itself
+  sort(similarities, decreasing = TRUE)[2:(top_n + 1)] ### indexing starts from 1 in r.
+}
+
+### find top 10 most similar words to "peace"
+similar_words_builtin <- find_similar_words(word_embeddings, "peace", top_n = 10)
+print(similar_words_builtin)
+```
+
+```{r}
+### convert results to data frame for plotting
+similar_words_df <- data.frame(
+  word = names(similar_words_builtin),
+  similarity = as.numeric(similar_words_builtin)
+)
+
+### plot top 10 most similar words
+ggplot(similar_words_df, aes(x = reorder(word, -similarity), y = similarity)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Top 10 Words Similar to 'Peace'") +
+  xlab("Word") +
+  ylab("Cosine Similarity") +
+  theme_minimal()
+```
+
+```{r}
+### find_nns returns nearest neighbors based on cosine similarity
+### you can check its website: https://rdrr.io/github/prodriguezsosa/conText/man/find_nns.html
+
+find_nns(target_embedding = word_embeddings["peace",],
+         pre_trained = word_embeddings, 
+         N = 10,
+         candidates = NULL, 
+         norm = "l2", 
+         stem = FALSE)
+```
+
+## Word2Vec: cbow and skip models
+
+```{r}
+### shallow neural network, similar to Word2Vec
+
+### extract text 
+text = ungd_data$text
+
+
+### train Word2Vec model
+word2vec_cbow<- word2vec(x= text, 
+                           type = "cbow", 
+                           dim = 20,
+                           iter = 15)
+
+
+### check embeddings 
+embedding_cbow<- as.matrix(word2vec_cbow)
+View(embedding_cbow)
+
+### find semantically similar words 
+similar<- predict(word2vec_cbow, c("war", "peace"), 
+                  type = "nearest", 
+                  top_n = 5) 
+print(similar)
+```
+
+## Interactive visualization
+
+```{r}
+### I have drawn from this website: https://www.geeksforgeeks.org/word2vec-using-r/
+
+### create corpus
+corpus <- Corpus(VectorSource(text))
+
+### preprocessing
+corpus <- tm_map(corpus, content_transformer(tolower)) 
+corpus <- tm_map(corpus, removePunctuation) 
+corpus <- tm_map(corpus, removeNumbers) 
+corpus <- tm_map(corpus, removeWords, stopwords("en")) 
+corpus <- tm_map(corpus, stripWhitespace)
+
+### convert to Document Term Matrix(DFM) and extract words
+dtm <- DocumentTermMatrix(corpus)
+words <- colnames(as.matrix(dtm))
+word_list <- strsplit(words, " ")
+word_list <- unlist(word_list)
+word_list <- word_list[word_list != ""]
+
+### take list of 50 words
+word_list <- head(word_list, 50)
+
+
+embedding_cbow<- predict(word2vec_cbow, word_list, type = "embedding")
+embedding_cbow<-na.omit(embedding_cbow)
+
+### visualize embeddings
+vizualization <- umap(embedding_cbow, n_neighbors = 15, n_threads = 2)
+
+embedding_df <- data.frame(word = rownames(embedding_cbow),  
+                 x = vizualization$layout[, 1], 
+                 y = vizualization$layout[, 2],  
+                 stringsAsFactors = FALSE)
+
+plot <- plot_ly(embedding_df, 
+                x = ~x, 
+                y = ~y, 
+                type = 'scatter', 
+                mode = 'text', 
+                text = ~word)
+plot <- plot %>% layout(title = "Visualization of CBOW Embeddings")
+
+plot
+```
+
+```{r}
+### train Word2Vec model using Skip-gram
+word2vec_skip <- word2vec(x = text, 
+                          type = "skip", 
+                          dim = 20,
+                          iter = 15,
+                          window = 5)  ### specify window size
+
+### Find semantically similar words
+similar <- predict(word2vec_skip, c("war", "peace"), type = "nearest", top_n = 5)
+print(similar)
+
+### check embeddings
+embedding_skip <- as.matrix(word2vec_skip)
+View(embedding_skip)
+```
